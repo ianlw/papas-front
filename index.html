@@ -20,6 +20,7 @@
         <!-- Botones -->
         <div class="text-center mt-4">
             <button id="capture-btn" class="btn btn-primary" disabled>Capturar y Enviar Foto</button>
+            <button id="change-camera-btn" class="btn btn-secondary mt-2">Cambiar Cámara</button>
         </div>
 
         <!-- Canvas oculto -->
@@ -29,20 +30,13 @@
         <div id="modal" class="modal fade" tabindex="-1" aria-labelledby="modalLabel" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
-      
                     <div class="modal-body text-center">
                         <img id="captured-image" class="img-fluid rounded mb-4" alt="Imagen capturada" style="display: none;">
-                        <!-- Spinner de carga (invisible inicialmente) -->
                         <div id="loading-spinner" class="d-flex justify-content-center mb-4">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
                             </div>
                         </div>
-                        <!-- <a id="close-modal" type="button" data-bs-dismiss="modal" aria-label="Salir">Salir</a> -->
-
-                        <!-- Imagen capturada -->
-
-                        <!-- Predicción (invisible inicialmente) -->
                         <p id="prediction" class="text-success font-weight-bold" style="display: none;"></p>
                     </div>
                 </div>
@@ -53,50 +47,80 @@
     <script>
         const video = document.getElementById('video');
         const captureBtn = document.getElementById('capture-btn');
+        const changeCameraBtn = document.getElementById('change-camera-btn');
         const canvas = document.getElementById('canvas');
         const modal = new bootstrap.Modal(document.getElementById('modal'));
         const capturedImage = document.getElementById('captured-image');
         const predictionText = document.getElementById('prediction');
 
-        // URL del servidor backend
         const serverUrl = "https://papas-back.onrender.com/predict";
 
-        // Iniciar cámara
-        async function startCamera() {
+        let currentStream = null;
+        let currentDeviceId = null;
+
+        // Función para obtener las cámaras disponibles
+        async function getCameraDevices() {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            return devices.filter(device => device.kind === 'videoinput');
+        }
+
+        // Función para iniciar la cámara
+        async function startCamera(deviceId) {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+
+                const constraints = {
+                    video: { deviceId: deviceId ? { exact: deviceId } : undefined }
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
                 captureBtn.disabled = false;
+                currentStream = stream;
             } catch (error) {
                 alert("No se pudo acceder a la cámara: " + error.message);
             }
         }
 
+        // Cambiar entre la cámara delantera y trasera
+        changeCameraBtn.addEventListener('click', async () => {
+            const devices = await getCameraDevices();
+            const currentIndex = devices.findIndex(device => device.deviceId === currentDeviceId);
+            const nextDevice = devices[(currentIndex + 1) % devices.length];
+
+            currentDeviceId = nextDevice.deviceId;
+            await startCamera(currentDeviceId);
+        });
+
+        // Iniciar la cámara por defecto (trasera)
+        window.addEventListener('load', async () => {
+            const devices = await getCameraDevices();
+            const rearCamera = devices.find(device => device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('rear'));
+            currentDeviceId = rearCamera ? rearCamera.deviceId : devices[0].deviceId; // Usa la cámara trasera si está disponible, si no, usa la primera cámara
+            await startCamera(currentDeviceId);
+        });
+
         // Capturar imagen y enviar al servidor
         captureBtn.addEventListener('click', async () => {
-            // Captura la imagen desde el video
             const context = canvas.getContext('2d');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Convertir la imagen a Blob (archivo)
             canvas.toBlob(async (blob) => {
                 const formData = new FormData();
                 formData.append('file', blob, 'captura.jpg');
-
-                // Mostrar el modal
                 modal.show();
 
-                // Mostrar el spinner de carga y ocultar la imagen y predicción
                 capturedImage.style.display = 'none';
-                        capturedImage.src = canvas.toDataURL();
-                        capturedImage.style.display = 'block';
+                capturedImage.src = canvas.toDataURL();
+                capturedImage.style.display = 'block';
                 predictionText.style.display = 'none';
-                        document.getElementById('loading-spinner').classList.remove('d-none');
+                document.getElementById('loading-spinner').classList.remove('d-none');
 
                 try {
-                    // Enviar la imagen al servidor
                     const response = await fetch(serverUrl, {
                         method: 'POST',
                         body: formData,
@@ -104,7 +128,6 @@
 
                     if (response.ok) {
                         const data = await response.json();
-                        // Mostrar la predicción
                         predictionText.textContent = `Predicción: ${data.prediction}`;
                         predictionText.style.display = 'block';
                         document.getElementById('loading-spinner').classList.add('d-none');
@@ -118,9 +141,6 @@
                 }
             }, 'image/jpeg');
         });
-
-        // Iniciar la cámara al cargar la página
-        window.addEventListener('load', startCamera);
     </script>
 </body>
 </html>
